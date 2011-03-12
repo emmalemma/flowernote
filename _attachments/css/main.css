@@ -22,13 +22,33 @@ h1 {
 	border: 10px solid black;
 	border-radius: 20px;
 	background-color: white;
+	width: 100px;
+	height: 10px;
+	z-index: 1;   
+	
+	-webkit-user-select: none;
+	-moz-user-select: none;
+	cursor:pointer;
+}
+
+.link {
+	position: absolute;
+	border-top: 3px solid black;
+	background-color: transparent;
 	width: 10px;
 	height: 10px;
 }
 .editable {
-	border: 1em solid gray;
+	border: 10px solid gray;
+	-webkit-user-select: text;
+	-moz-user-select: text;
+	cursor:text;
 }
 .content {
-	padding: 1em;
+	position: relative;
+	top: 50%;
+	margin: 0px;
+	padding: 0px;
 	text-align: center;
+	word-wrap: normal !important;
 }

@@ -4,7 +4,7 @@ window.Collections ?= {}
 
 window.Physics =
 	drag:(node)->
-		coefficient = 0.1
+		coefficient = 0.07
 		
 		accel =
 			x: if node.velocity.x then -Math.cos(node.theta)*coefficient else 0
@@ -18,24 +18,50 @@ window.Physics =
 		accel
 		
 	rest: 0.0001
-
+Models.Link = Backbone.Model.extend
+	defaults:
+		kind: 'link'
+		nodes: []
+		length: 100
+		content: ''
+		
+	initialize:->
+		console.log @
+		#apply a spring force to the two nodes
+		nodes = @get 'nodes'
+		_([[nodes[0],nodes[1]],[nodes[1],nodes[0]]]).each (nodes)->
+			[n1,n2] = nodes
+			console.log "pushing #{n1.get 'content'} toward #{n2.get 'content'}"
+			n1.forces.push (node)->
+				equilibrium = 100
+				coefficient = 0.0001
+				dx = n2.attributes.position.x - n1.attributes.position.x
+				dy = n2.attributes.position.y - n1.attributes.position.y
+				distance = Math.sqrt(dx*dx + dy*dy)
+				accel =
+					x: dx * coefficient * (distance - equilibrium)
+					y: dy * coefficient * (distance - equilibrium)
+				
+		
 Models.Node = Backbone.Model.extend
 	defaults:
+		kind: 'node'
 		position:
 			x: 0
 			y: 0
 		content: ''
 		size: 12
 		
-	velocity:
-		x: 3
-		y: 1
-		
 	initialize:->
 		_.bindAll @, 'tick'
+		
+		@forces = [Physics.drag]
+		
+		@velocity = 
+			x: 0
+			y: 0
+		
 		@tick()
-	
-	forces: [Physics.drag]
 	
 	tick:->
 		#find the direction of travel
@@ -46,7 +72,7 @@ Models.Node = Backbone.Model.extend
 			accel = force(@)
 			@velocity.x += accel.x
 			@velocity.y += accel.y
-		
+				
 		if Math.abs(@velocity.x) < Physics.rest
 			@velocity.x = 0
 		if Math.abs(@velocity.y) < Physics.rest
@@ -58,20 +84,71 @@ Models.Node = Backbone.Model.extend
 	
 		@trigger 'change:position', @
 		
-		#console.log position.x,position.y, @velocity.x,@velocity.y, @acceleration.x,@acceleration.y 
-		
 		_.delay @tick, 10
+
+Collections.Links = Backbone.Collection.extend
+	model: Models.Link
+	couch:
+		ddoc: 'document'
+		view: 'byKind'
+		key: 'link'
 		
+	initialize:(models, options)->
+		if options.db
+			@couch.db = options.db
+
 Collections.Nodes = Backbone.Collection.extend
 	model: Models.Node
 	couch:
 		ddoc: 'document'
-		view: 'all'
+		view: 'byKind'
+		key: 'node'
 
-	initialize:(options)->
+	initialize:(models, options)->
+		console.log models, options
 		if options.db
 			@couch.db = options.db
-			
+
+Views.Link = Backbone.View.extend
+	tagName: 'div'
+	className: 'link'
+		
+	initialize:->
+		_.bindAll @, 'render', 'draw'
+		
+		@el = $(@el)
+		@content = $("<div class='content' />")
+		@el.append @content
+		
+		_.each @model.get('nodes'), (node)=>
+			node.bind 'change:position', @draw
+		
+		@draw()
+		
+	render:->
+		@content.text @model.get 'content'
+		@
+		
+	draw:->
+		nodes = @model.get 'nodes'
+		n1 = nodes[0]
+		n2 = nodes[1]
+		
+		x1 = n1.attributes.position.x
+		x2 = n2.attributes.position.x
+		y1 = n1.attributes.position.y
+		y2 = n2.attributes.position.y
+		
+		dx = x2-x1
+		dy = y2-y1
+		
+		distance = Math.sqrt(dx*dx + dy*dy)
+		@el.css
+			width: 	"#{distance}px"
+			left:	"#{x1+dx/2 - distance/2}px"
+			top:	"#{y1+dy/2}px"
+			"-webkit-transform": "rotate(#{Math.atan2(dy,dx)}rad)"
+
 Views.Node = Backbone.View.extend
 	tagName: 'div'
 	className: 'node'	
@@ -104,14 +181,31 @@ Views.Node = Backbone.View.extend
 			y = e.pageY-@el.position().top-@radius-10
 			distance = Math.sqrt(x*x + y*y)
 			if distance < @radius
+				#let the user select text if they're editing
+				return if @el.hasClass 'editable'
 				@startDrag(e)
 			else if distance < @radius + 10
+				#stop editing
+				if @el.hasClass 'editable'
+					@unedit
+				#create a child node
 				node = new Models.Node
 					position:
 						x: e.pageX
 						y: e.pageY
 					content: 'new node'
+				
+				#add it to the document
 				Nodes.collection.add node
+				
+				#link us
+				link = new Models.Link
+					nodes: [@model, node]
+				#and add the link
+				Nodes.collection.add link
+				
+				#and start dragging it
+				node.view.startDrag.call(node, e, edit: true)
 		
 		#and it moves
 		@model.bind 'change:position', @move
@@ -127,20 +221,24 @@ Views.Node = Backbone.View.extend
 		@
 		
 	resize:->
-		if @content.attr('offsetHeight') - @el.height() > 10
+		#console.log @content.attr('scrollWidth') - @el.width(), @content.attr('scrollHeight') - @el.height()
+		@content.css 	
+			"margin-top": "-#{@content.attr('scrollHeight')/2}px"
+			
+		if @content.attr('scrollHeight') > @el.height() or @content.attr('scrollWidth') > @el.width()
 			@radius += 1
 			@el.css
 				width: "#{@radius * 2}px"
 				height: "#{@radius * 2}px"
 				"border-radius": "#{@radius * 2}px"
 			_.defer @resize
-		else if @content.attr('offsetHeight') - @el.height() < -10
-			@radius -= 1
-			@el.css
-				width: "#{@radius * 2}px"
-				height: "#{@radius * 2}px"
-				"border-radius": "#{@radius * 2}px"
-			_.defer @resize
+		# else if @content.attr('offsetHeight') - @el.height() < -10 or @content.attr('scrollWidth') - @el.width() < -10
+		# 		@radius -= 1
+		# 		@el.css
+		# 			width: "#{@radius * 2}px"
+		# 			height: "#{@radius * 2}px"
+		# 			"border-radius": "#{@radius * 2}px"
+		# 		_.defer @resize
 			 
 	edit:->
 		@el.addClass 'editable'
@@ -148,7 +246,12 @@ Views.Node = Backbone.View.extend
 		@content.attr('contentEditable', on)
 		@content.focus()
 		
-		@content.keydown @resize
+		@content.keydown (e)=>
+			if (e.keyCode == 13)
+				@unedit()
+			_.defer @resize
+		_.defer @resize
+		
 	unedit:->
 		@content.attr('contentEditable', off)
 		@el.removeClass 'editable'
@@ -156,10 +259,11 @@ Views.Node = Backbone.View.extend
 		
 	move:->
 		@el.css
-			left:	"#{@model.attributes.position.x-@radius-10}px"
-			top:	"#{@model.attributes.position.y-@radius-10}px"
+			left:	"#{@position().x}px"
+			top:	"#{@position().y}px"
 				
-	startDrag:(e)->
+	startDrag:(e, options)->
+		options ?= {}
 		constant = 0.1
 		
 		dragTarget =
@@ -169,9 +273,8 @@ Views.Node = Backbone.View.extend
 						dragTarget =
 							x: e.pageX
 							y: e.pageY
-						console.log dragTarget.x, dragTarget.y, e
 		
-		drag =(node)=>
+		drag =(node)->
 			accel=
 				x: (node.attributes.position.x - dragTarget.x) * -constant
 				y: (node.attributes.position.y - dragTarget.y) * -constant
@@ -183,25 +286,43 @@ Views.Node = Backbone.View.extend
 						$('.document').unbind 'mousemove'
 						$('.document').unbind 'mouseup'
 						@model.forces = _(@model.forces).without drag
-						console.log forces: @model.forces
+						#this is a new node, start editing once it's placed
+						if options.edit
+							@edit()
+
+	
+	#the actual screen coordinates used for drawing
+	position:->
+		x: @model.attributes.position.x-@radius-10
+		y: @model.attributes.position.y-@radius-10
 
 Views.Nodes = Backbone.View.extend
 	initialize:(options)->
-		_.bindAll @, 'addNodes', 'addNode'
+		_.bindAll @, 'addObjs', 'addObj'
 		
-		@collection.bind 'refresh', @addNodes
-		@collection.bind 'add', @addNode
+		@collection.bind 'refresh', @addObjs
+		@collection.bind 'add', @addObj
 		
 		@collection.fetch()
 		
-	addNodes:(col)->
-		col.each @addNode
+		@links = new Collections.Links null, db: @collection.couch.db
 		
-	addNode:(node)->
-		node.view = new Views.Node model: node
-		@el.append node.view.render().el
+		@links.bind 'refresh', @addObjs
+		@links.bind 'add', @addObj
 		
-window.Nodes = new Views.Nodes 
-	collection: new Collections.Nodes
-		db: 'document_1'
+		
+	addObjs:(col)->
+		col.each @addObj
+		
+	addObj:(obj)->
+		switch obj.attributes.kind
+			when 'node'
+				obj.view = new Views.Node model: obj
+			when 'link'
+				obj.view = new Views.Link model: obj
+		@el.append obj.view.render().el
+		
+window.Nodes = new Views.Nodes {
+	collection: new Collections.Nodes null, {db: 'document_1'}
 	el: $('.document')
+}
