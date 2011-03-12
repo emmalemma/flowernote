@@ -8,11 +8,11 @@
 // I added the connector to the Backbone object.
 Backbone.couchConnector = {
 	// Name of the Database.
-	databaseName : "default",
+	databaseName : null,
 	// Name of the design document that contains the views.
-	ddocName : "default",
+	ddocName : null,
 	// Name of the view.
-	viewName : "byCollection",
+	viewName : null,
 	// Enable updates via the couchdb _changes feed
 	enableChanges : false,
 	// If `baseUrl` is set, the default uri of jquery.couch.js will be overridden.
@@ -79,9 +79,9 @@ Backbone.couchConnector = {
 	// doc.collection represents the url property of the collection and is automatically added to the model.
 	readCollection : function(coll, _success, _error){
 		var db = this.makeDb(coll);
-		var key = this.keyFor(coll);
+		
 		var query = this.ddocNameFor(coll) + "/" + this.viewNameFor(coll);
-		var _models = this._models;
+		var key = this.keyFor(coll);
 		// Query equals ddocName/viewName 
 		options = {
 			// Only return docs that have this collection's name as key.
@@ -106,9 +106,17 @@ Backbone.couchConnector = {
 			},
 			error: _error
 		};
+		
 		if (typeof key != 'undefined')
 			options['keys'] = [key];
-		db.view(query, options);
+			
+		if (!this.viewNameFor(coll))
+		{
+			db.allDocs(options);
+		} else {
+			db.view(query, options);
+		}
+		
 		// Add the collection to the `_watchlist`.
 		// if(!this._watchList[collection]){
 		// 			this._watchList[collection] = coll;			
