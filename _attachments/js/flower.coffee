@@ -27,13 +27,16 @@ Models.Link = Backbone.Model.extend
 		
 	initialize:->
 		console.log @
+		if @nodes[0] is Model.Node
+			@nodes = @model.attributes.nodes
+			@model.attributes.nodes = []
+		
 		#apply a spring force to the two nodes
-		nodes = @get 'nodes'
-		_([[nodes[0],nodes[1]],[nodes[1],nodes[0]]]).each (nodes)->
+		_([[@nodes[0],@nodes[1]],[@nodes[1],@nodes[0]]]).each (nodes)->
 			[n1,n2] = nodes
 			console.log "pushing #{n1.get 'content'} toward #{n2.get 'content'}"
 			n1.forces.push (node)->
-				equilibrium = 100
+				equilibrium = @get 'length'
 				coefficient = 0.0001
 				dx = n2.attributes.position.x - n1.attributes.position.x
 				dy = n2.attributes.position.y - n1.attributes.position.y

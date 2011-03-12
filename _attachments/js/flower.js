@@ -33,10 +33,12 @@
       content: ''
     },
     initialize: function() {
-      var nodes;
       console.log(this);
-      nodes = this.get('nodes');
-      return _([[nodes[0], nodes[1]], [nodes[1], nodes[0]]]).each(function(nodes) {
+      if (this.nodes[0] === Model.Node) {
+        this.nodes = this.model.attributes.nodes;
+        this.model.attributes.nodes = [];
+      }
+      return _([[this.nodes[0], this.nodes[1]], [this.nodes[1], this.nodes[0]]]).each(function(nodes) {
         var _ref, n1, n2;
         _ref = nodes;
         n1 = _ref[0];
@@ -44,7 +46,7 @@
         console.log("pushing " + (n1.get('content')) + " toward " + (n2.get('content')));
         return n1.forces.push(function(node) {
           var accel, coefficient, distance, dx, dy, equilibrium;
-          equilibrium = 100;
+          equilibrium = this.get('length');
           coefficient = 0.0001;
           dx = n2.attributes.position.x - n1.attributes.position.x;
           dy = n2.attributes.position.y - n1.attributes.position.y;
