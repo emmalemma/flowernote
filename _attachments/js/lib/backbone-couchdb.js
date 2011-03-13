@@ -25,7 +25,7 @@ Backbone.couchConnector = {
 	// A lookup table for models that exist.
 	_models : {
 		add : function (model) {
-			var dbname = (model.couch && model.couch.db) || this.databaseName;
+			var dbname = (model.couch && model.couch.db) || (model.collection.couch && model.collection.couch.db) || this.databaseName;
 			
 			if (!(dbname in this.dbs))
 				this.dbs[dbname] = {};
@@ -51,7 +51,7 @@ Backbone.couchConnector = {
 	},
 	// Creates a couchDB object from the given model object.
 	makeDb : function(model){
-		var dbName = (model.couch && model.couch.db) || this.databaseName;
+		var dbName = (model.couch && model.couch.db) || (model.collection.couch && model.collection.couch.db) || this.databaseName;
 		var db = $.couch.db(dbName);
 		if(this.baseUrl){
 			db.uri = this.baseUrl + "/" + dbName + "/";
@@ -223,12 +223,12 @@ Backbone.couchConnector = {
 					// Iterate over the changed docs and validate them.
 					for (var i=0; i < changes.results.length; i++) {
 						doc = changes.results[i].doc;
-						console.log({changed: doc, _models: connector._models});
+						// console.log({changed: doc, _models: connector._models});
 						// Let's do this differently.
 						// Do we already know about this model?
 						if (doc._id in connector._models.dbs[db.name]) {
 							model = connector._models.dbs[db.name][doc._id];
-							console.log ({located: doc, model: model});
+							// console.log ({located: doc, model: model});
 							//Check if the model on this client has changed by comparing `rev`.
 							if(doc._rev != model.get("_rev")){
 								// `doc._rev` is newer than the `rev` attribute of the model, so we update it.
