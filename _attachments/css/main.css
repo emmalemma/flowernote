@@ -15,15 +15,15 @@ h1 {
 	overflow: scroll;
 }
 .document {
-	width: 1000px;
-	height: 1000px;
+	width: 2000px;
+	height: 2000px;
 	position: relative;
 	background-color: gray;
 }
 
 .node {
 	position: absolute;
-	border: 10px solid black;
+	border: 10px solid DimGray;
 	border-radius: 20px;
 	background-color: white;
 	width: 100px;
@@ -47,9 +47,13 @@ h1 {
 	background-color: transparent;
 	width: 10px;
 	height: 10px;
+	
+	-webkit-user-select: none;
+	-moz-user-select: none;
+	cursor:pointer;
 }
 .editable {
-	border: 10px solid gray;
+	border-color: white;
 	-webkit-user-select: text;
 	-moz-user-select: text;
 	cursor:text;

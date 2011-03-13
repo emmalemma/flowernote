@@ -4,7 +4,7 @@ window.Collections ?= {}
 
 window.Physics =
 	friction:(node)->
-		coefficient = -0.2
+		coefficient = -0.1
 		
 		accel =
 			x: node.velocity.x * coefficient
@@ -12,8 +12,8 @@ window.Physics =
 		
 	repel:(node)->
 		#the repulsive force of nodes
-		charge = 24
-		range = 200
+		charge = 25
+		range = node.view.radius * 4 #only ones that are relatively close
 		accel =
 			x: 0
 			y: 0
@@ -56,15 +56,15 @@ Models.Link = Backbone.Model.extend
 			#if we've got node models, we need to turn them into ids
 			@nodes = @attributes.nodes
 			
-		if (@nodes.length != 2)
+		unless (@nodes[0] and @nodes[1])
 			return @remove()
-		
+			
 		_([[@nodes[0],@nodes[1]],[@nodes[1],@nodes[0]]]).each (nodes)=>
 			[n1,n2] = nodes
 			force =(node)=>
 				equilibrium = @attributes.length
 				return {x: 0, y: 0} if n2.view.dragging or n1.view.dragging
-				coefficient = -0.05
+				coefficient = -0.005
 				dx = n1.attributes.position.x - n2.attributes.position.x
 				dy = n1.attributes.position.y - n2.attributes.position.y
 				distance = Math.sqrt(dx*dx + dy*dy)
@@ -76,7 +76,8 @@ Models.Link = Backbone.Model.extend
 			n1.forces.push force
 			@forces.push force
 			
-		@bind 'change:length', ()=>@save null
+		@bind 'change:length', ()=>@save null	
+		@bind 'change:content', ()=>@save null
 			
 	remove:->
 		#remove my force from nodes
@@ -194,7 +195,7 @@ Views.Link = Backbone.View.extend
 	className: 'link'
 		
 	initialize:->
-		_.bindAll @, 'render', 'draw'
+		_.bindAll @, 'render', 'draw', 'edit', 'unedit'
 		
 		@el = $(@el)
 		@content = $("<div class='content' />")
@@ -202,6 +203,21 @@ Views.Link = Backbone.View.extend
 		
 		_.each @model.nodes, (node)=>
 			node.bind 'change:position', @draw
+		
+		#you can delete it
+		@el.mouseover (e)=>
+			return unless e.currentTarget == e.target
+			if Nodes.isMouseDown
+				@severing = true
+				
+		@el.mouseout (e)=>
+			return unless e.currentTarget == e.target
+			if Nodes.isMouseDown and @severing
+				@model.remove()
+		
+		#you can edit it
+		@el.dblclick @edit
+		@content.blur @unedit
 		
 		@draw()
 		
@@ -228,13 +244,34 @@ Views.Link = Backbone.View.extend
 			left:	"#{x1+dx/2 - distance/2}px"
 			top:	"#{y1+dy/2}px"
 			"-webkit-transform": "rotate(#{Math.atan2(dy,dx)}rad)"
+			
+	edit:->
+		@el.addClass 'editable'
+		
+		@content.attr('contentEditable', on)
+		@content.focus()
+				# 
+				# unless @content.text()
+				# 	@content.text = 'link'
+		
+		@content.keydown (e)=>
+			if (e.keyCode == 13)
+				@unedit()
+				
+	unedit:->
+		#set the content
+		@model.set content: @content.text()
+
+		@content.attr('contentEditable', off)
+		@el.removeClass 'editable'
+		@content.unbind 'keydown'
 
 Views.Node = Backbone.View.extend
 	tagName: 'div'
 	className: 'node'	
 	
 	initialize:->
-		_.bindAll @, 'render', 'resize', 'edit', 'unedit', 'move', 'startDrag', 'savePosition', 'pin', 'endDrag'
+		_.bindAll @, 'render', 'resize', 'edit', 'unedit', 'move', 'startDrag', 'savePosition', 'pin', 'endDrag', 'link'
 		
 		@el = $(@el)
 		@content = $("<div class='content' />")
@@ -300,8 +337,9 @@ Views.Node = Backbone.View.extend
 	
 	savePosition:(model)->
 		pos = model.get 'position'
+		tolerance = 100
 		#only save on significant moves
-		if Math.abs(@lastPos.x-pos.x) > 10 or Math.abs(@lastPos.y-pos.y) > 10
+		if Math.abs(@lastPos.x-pos.x) > tolerance or Math.abs(@lastPos.y-pos.y) > 100
 			model.save null
 			@lastPos = _.clone pos
 	
@@ -326,7 +364,9 @@ Views.Node = Backbone.View.extend
 			error: (m,r)->console.log m,r
 		
 		#and start dragging it
-		node.view.startDrag.call(node, null, edit: true)
+		node.view.startDrag.call(node, null, spawn: true)
+		#replace the click with a mouseup
+		node.view.el.unbind 'click'
 		node.view.el.mouseup node.view.endDrag
 		
 	render:->
@@ -358,6 +398,9 @@ Views.Node = Backbone.View.extend
 					height: "#{@radius * 2}px"
 					"border-radius": "#{@radius * 2}px"
 				_.defer @resize
+		else #we're sized, which means our position has changed
+			@model.trigger 'change:position', @model
+			
 			 
 	edit:->
 		@el.append $("<div class='menu'><div class='remove'>X</div><div class='pin'>*</div></div>")
@@ -394,6 +437,14 @@ Views.Node = Backbone.View.extend
 			_.defer @model.tick
 			
 		
+	link:(node)->
+		link = new Models.Link
+			nodes: [@model, node]
+		#and add the link
+		Nodes.collection.links.add link
+		link.save {nodes: [@model.id, node.id]}
+		
+		
 	move:->
 		@el.css
 			left:	"#{@position().x}px"
@@ -401,13 +452,18 @@ Views.Node = Backbone.View.extend
 				
 	startDrag:(e, options)->
 		options ?= {}
-		
 		return if @el.hasClass 'editable'
 		
+		#if we're dragging someone else, this means to link us (and don't drag)
+		if @model.collection.view.dragging
+			@link @model.collection.view.dragging.model
+			return
+			
 		@el.addClass 'dragging'
 		
 		constant = 0.01
 		@dragging = true
+		@model.collection.view.dragging = @
 		dragTarget =
 			x: @model.attributes.position.x
 			y: @model.attributes.position.y
@@ -422,24 +478,32 @@ Views.Node = Backbone.View.extend
 			accel
 		@model.forces.push @drag
 		
-		@el.click @endDrag
+		if options.spawn
+			@el.unbind 'mouseup'
+			@el.mouseup @endDrag
+			@el.mouseup @edit
+		else
+			@el.unbind 'click'
+			@el.click @endDrag
 		
 	endDrag:(e)->
 		return unless @dragging
 		@dragging = false
+		@model.collection.view.dragging = null
 		
 		@el.removeClass 'dragging'
 		
 		$('.document').unbind 'mousemove'
-		$('.document').unbind 'click'
 		@model.forces = _(@model.forces).without @drag
 		#this is a new node, start editing once it's placed
-		if options.edit
-			@edit()
-			@selectContent()
+		
 		@model.eachLink (link)=>link.respring()
 		
+		#save it in a bit (after it's calmed down)
+		_.delay _(@model.save).bind(@model), 1000, null
+		
 		@el.unbind 'click'
+		@el.unbind 'mouseup'
 		@el.click @startDrag
 					
 	selectContent:->
@@ -458,8 +522,9 @@ Views.Nodes = Backbone.View.extend
 		
 		@collection.bind 'refresh', @addObjs
 		@collection.bind 'add', @addObj
-		
 		@collection.bind 'remove', @removeObj
+		
+		@collection.view = @
 		
 		@collection.fetch()
 		
@@ -483,6 +548,11 @@ Views.Nodes = Backbone.View.extend
 						node.editOnWake = true
 						@collection.add node
 						node.save null
+		
+		@el.mousedown (e)=>
+			@isMouseDown = yes
+		@el.mouseup (e)=>
+			@isMouseDown = no
 		
 	removeObj:(model,col)->
 		#delete it from the DOM

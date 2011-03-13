@@ -8,7 +8,7 @@
   window.Physics = {
     friction: function(node) {
       var accel, coefficient;
-      coefficient = -0.2;
+      coefficient = -0.1;
       return (accel = {
         x: node.velocity.x * coefficient,
         y: node.velocity.y * coefficient
@@ -16,8 +16,8 @@
     },
     repel: function(node) {
       var accel, charge, range;
-      charge = 24;
-      range = 200;
+      charge = 25;
+      range = node.view.radius * 4;
       accel = {
         x: 0,
         y: 0
@@ -68,7 +68,7 @@
       } else {
         this.nodes = this.attributes.nodes;
       }
-      if (this.nodes.length !== 2) {
+      if (!(this.nodes[0] && this.nodes[1])) {
         return this.remove();
       }
       _([[this.nodes[0], this.nodes[1]], [this.nodes[1], this.nodes[0]]]).each(__bind(function(nodes) {
@@ -85,7 +85,7 @@
               y: 0
             };
           }
-          coefficient = -0.05;
+          coefficient = -0.005;
           dx = n1.attributes.position.x - n2.attributes.position.x;
           dy = n1.attributes.position.y - n2.attributes.position.y;
           distance = Math.sqrt(dx * dx + dy * dy);
@@ -98,7 +98,10 @@
         n1.forces.push(force);
         return this.forces.push(force);
       }, this));
-      return this.bind('change:length', __bind(function() {
+      this.bind('change:length', __bind(function() {
+        return this.save(null);
+      }, this));
+      return this.bind('change:content', __bind(function() {
         return this.save(null);
       }, this));
     },
@@ -237,13 +240,27 @@
     tagName: 'div',
     className: 'link',
     initialize: function() {
-      _.bindAll(this, 'render', 'draw');
+      _.bindAll(this, 'render', 'draw', 'edit', 'unedit');
       this.el = $(this.el);
       this.content = $("<div class='content' />");
       this.el.append(this.content);
       _.each(this.model.nodes, __bind(function(node) {
         return node.bind('change:position', this.draw);
       }, this));
+      this.el.mouseover(__bind(function(e) {
+        if (e.currentTarget !== e.target) {
+          return null;
+        }
+        return Nodes.isMouseDown ? (this.severing = true) : null;
+      }, this));
+      this.el.mouseout(__bind(function(e) {
+        if (e.currentTarget !== e.target) {
+          return null;
+        }
+        return Nodes.isMouseDown && this.severing ? this.model.remove() : null;
+      }, this));
+      this.el.dblclick(this.edit);
+      this.content.blur(this.unedit);
       return this.draw();
     },
     render: function() {
@@ -270,6 +287,22 @@
         top: ("" + (y1 + dy / 2) + "px"),
         "-webkit-transform": ("rotate(" + (Math.atan2(dy, dx)) + "rad)")
       });
+    },
+    edit: function() {
+      this.el.addClass('editable');
+      this.content.attr('contentEditable', true);
+      this.content.focus();
+      return this.content.keydown(__bind(function(e) {
+        return (e.keyCode === 13) ? this.unedit() : null;
+      }, this));
+    },
+    unedit: function() {
+      this.model.set({
+        content: this.content.text()
+      });
+      this.content.attr('contentEditable', false);
+      this.el.removeClass('editable');
+      return this.content.unbind('keydown');
     }
   });
   Views.Node = Backbone.View.extend({
@@ -277,7 +310,7 @@
     className: 'node',
     initialize: function() {
       var clearMousedown, countdown;
-      _.bindAll(this, 'render', 'resize', 'edit', 'unedit', 'move', 'startDrag', 'savePosition', 'pin', 'endDrag');
+      _.bindAll(this, 'render', 'resize', 'edit', 'unedit', 'move', 'startDrag', 'savePosition', 'pin', 'endDrag', 'link');
       this.el = $(this.el);
       this.content = $("<div class='content' />");
       this.el.append(this.content);
@@ -323,9 +356,10 @@
       return this.model.get('pinned') ? this.el.addClass('pinned') : null;
     },
     savePosition: function(model) {
-      var pos;
+      var pos, tolerance;
       pos = model.get('position');
-      if (Math.abs(this.lastPos.x - pos.x) > 10 || Math.abs(this.lastPos.y - pos.y) > 10) {
+      tolerance = 100;
+      if (Math.abs(this.lastPos.x - pos.x) > tolerance || Math.abs(this.lastPos.y - pos.y) > 100) {
         model.save(null);
         return (this.lastPos = _.clone(pos));
       }
@@ -356,8 +390,9 @@
         }
       });
       node.view.startDrag.call(node, null, {
-        edit: true
+        spawn: true
       });
+      node.view.el.unbind('click');
       return node.view.el.mouseup(node.view.endDrag);
     },
     render: function() {
@@ -388,6 +423,8 @@
           "border-radius": ("" + (this.radius * 2) + "px")
         });
         return _.defer(this.resize);
+      } else {
+        return this.model.trigger('change:position', this.model);
       }
     },
     edit: function() {
@@ -428,6 +465,16 @@
         return _.defer(this.model.tick);
       }
     },
+    link: function(node) {
+      var link;
+      link = new Models.Link({
+        nodes: [this.model, node]
+      });
+      Nodes.collection.links.add(link);
+      return link.save({
+        nodes: [this.model.id, node.id]
+      });
+    },
     move: function() {
       return this.el.css({
         left: ("" + (this.position().x) + "px"),
@@ -440,9 +487,14 @@
       if (this.el.hasClass('editable')) {
         return null;
       }
+      if (this.model.collection.view.dragging) {
+        this.link(this.model.collection.view.dragging.model);
+        return null;
+      }
       this.el.addClass('dragging');
       constant = 0.01;
       this.dragging = true;
+      this.model.collection.view.dragging = this;
       dragTarget = {
         x: this.model.attributes.position.x,
         y: this.model.attributes.position.y
@@ -462,25 +514,30 @@
         return accel;
       };
       this.model.forces.push(this.drag);
-      return this.el.click(this.endDrag);
+      if (options.spawn) {
+        this.el.unbind('mouseup');
+        this.el.mouseup(this.endDrag);
+        return this.el.mouseup(this.edit);
+      } else {
+        this.el.unbind('click');
+        return this.el.click(this.endDrag);
+      }
     },
     endDrag: function(e) {
       if (!(this.dragging)) {
         return null;
       }
       this.dragging = false;
+      this.model.collection.view.dragging = null;
       this.el.removeClass('dragging');
       $('.document').unbind('mousemove');
-      $('.document').unbind('click');
       this.model.forces = _(this.model.forces).without(this.drag);
-      if (options.edit) {
-        this.edit();
-        this.selectContent();
-      }
       this.model.eachLink(__bind(function(link) {
         return link.respring();
       }, this));
+      _.delay(_(this.model.save).bind(this.model), 1000, null);
       this.el.unbind('click');
+      this.el.unbind('mouseup');
       return this.el.click(this.startDrag);
     },
     selectContent: function() {
@@ -502,6 +559,7 @@
       this.collection.bind('refresh', this.addObjs);
       this.collection.bind('add', this.addObj);
       this.collection.bind('remove', this.removeObj);
+      this.collection.view = this;
       this.collection.fetch();
       this.links = new Collections.Links(null, {
         db: this.collection.couch.db
@@ -513,7 +571,7 @@
         return this.links.fetch();
       }, this));
       this.collection.links = this.links;
-      return this.el.dblclick(__bind(function(e) {
+      this.el.dblclick(__bind(function(e) {
         var node;
         if (e.target !== e.currentTarget) {
           return null;
@@ -528,6 +586,12 @@
         node.editOnWake = true;
         this.collection.add(node);
         return node.save(null);
+      }, this));
+      this.el.mousedown(__bind(function(e) {
+        return (this.isMouseDown = true);
+      }, this));
+      return this.el.mouseup(__bind(function(e) {
+        return (this.isMouseDown = false);
       }, this));
     },
     removeObj: function(model, col) {
